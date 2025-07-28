@@ -1,75 +1,99 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <title>Mã hóa Ảnh Điện thoại</title>
-  <style>
-    .card {
-      max-width: 600px;
-      margin: 2rem auto;
-      border-radius: 15px;
-      box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-    }
-    .btn-action {
-      min-width: 150px;
-      margin: 10px;
-      padding: 12px 20px;
-      font-weight: 600;
-    }
-    .status-box {
-      background: #f8f9fa;
-      border-radius: 10px;
-      padding: 15px;
-      margin-top: 20px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css">
+    <title>Mã hóa Ảnh Điện thoại</title>
+    <style>
+        body {
+            background-color: #f0f2f5;
+        }
+        .card {
+            max-width: 700px;
+            margin: 2rem auto;
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+        }
+        .card-header {
+            border-top-left-radius: 15px;
+            border-top-right-radius: 15px;
+        }
+        .btn-action {
+            width: 100%;
+            padding: 12px 20px;
+            font-weight: 600;
+            margin-top: 10px;
+        }
+        .instruction-box {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            border: 1px solid #dee2e6;
+        }
+    </style>
 </head>
-<body class="bg-light">
-  <div class="container py-5">
+<body>
+<div class="container py-4">
     <div class="card shadow-sm">
-      <div class="card-header bg-primary text-white">
-        <h2 class="text-center mb-0">Mã Hóa Ảnh Điện Thoại</h2>
-      </div>
-      <div class="card-body text-center">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, msg in messages %}
-              <div class="alert alert-{{ category }} alert-dismissible fade show">
-                {{ msg }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-              </div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
-        
-        <div class="my-4">
-          <a href="/encrypt" class="btn btn-danger btn-action">
-            <i class="bi bi-lock-fill"></i> Mã Hóa 5 Ảnh Mới Nhất
-          </a>
-          <a href="/decrypt" class="btn btn-success btn-action">
-            <i class="bi bi-unlock-fill"></i> Giải Mã Ảnh
-          </a>
+        <div class="card-header bg-primary text-white">
+            <h2 class="text-center mb-0"><i class="bi bi-shield-lock-fill"></i> Trình Mã Hóa Ảnh</h2>
         </div>
-        
-        <div class="status-box text-start">
-          <h5>Hướng dẫn sử dụng:</h5>
-          <ol>
-            <li>Kết nối điện thoại với máy tính</li>
-            <li>Chọn chế độ truyền file (File Transfer/MTP)</li>
-            <li>Bấm <strong>Mã Hóa</strong> để bảo vệ ảnh</li>
-            <li>File khóa sẽ được lưu trên Desktop</li>
-          </ol>
-          <p class="text-muted mb-0">Hỗ trợ: Android, iOS, Windows, macOS</p>
+        <div class="card-body p-4">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, msg in messages %}
+                        <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                            {{ msg }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            
+            <div class="instruction-box text-start">
+                <h5><i class="bi bi-info-circle-fill"></i> Hướng dẫn:</h5>
+                <ol class="mb-2">
+                    <li>Kết nối điện thoại với máy tính và chọn chế độ <strong>Truyền tệp (File Transfer/MTP)</strong>.</li>
+                    <li>Mở <strong>File Explorer</strong> (This PC), tìm đến điện thoại của bạn.</li>
+                    <li>Điều hướng đến thư mục chứa ảnh (thường là <code>Internal storage\DCIM\Camera</code>).</li>
+                    <li><strong>Click vào thanh địa chỉ</strong> ở trên cùng để sao chép đường dẫn.</li>
+                    <li><strong>Dán đường dẫn</strong> vào ô bên dưới.</li>
+                </ol>
+                <img src="https://i.imgur.com/fA4L48t.png" class="img-fluid rounded" alt="Hướng dẫn lấy đường dẫn">
+            </div>
+
+            <hr class="my-4">
+
+            <form method="POST" class="mb-3">
+                <div class="mb-3">
+                    <label for="pathInput" class="form-label fw-bold">Dán đường dẫn thư mục ảnh vào đây:</label>
+                    <input type="text" class="form-control form-control-lg" id="pathInput" name="path" placeholder="Ví dụ: This PC\Galaxy S23\Internal storage\DCIM\Camera" required>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6">
+                        <button formaction="{{ url_for('encrypt') }}" type="submit" class="btn btn-danger btn-action">
+                            <i class="bi bi-lock-fill"></i> Mã Hóa 5 Ảnh Mới Nhất
+                        </button>
+                    </div>
+                    <div class="col-md-6">
+                        <button formaction="{{ url_for('decrypt') }}" type="submit" class="btn btn-success btn-action">
+                            <i class="bi bi-unlock-fill"></i> Giải Mã Tất Cả Ảnh
+                        </button>
+                    </div>
+                </div>
+            </form>
         </div>
-      </div>
-      <div class="card-footer text-center text-muted">
-        <small>Ứng dụng bảo mật | Tự động ngắt kết nối sau 10 phút</small>
-      </div>
+        <div class="card-footer text-center text-muted">
+            <small>Lưu ý: Luôn giữ file <code>photo_encryption.key</code> trên Desktop để giải mã.</small>
+        </div>
     </div>
-  </div>
-  
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>
