@@ -102,61 +102,34 @@ def index():
 
 @app.route('/encrypt')
 def encrypt():
-    start_time = datetime.now()
-    phone_dir = find_phone_photos_dir()
-    
-    if not phone_dir:
-        flash('Không tìm thấy thư mục ảnh trên điện thoại. Hãy kết nối điện thoại và thử lại.', 'danger')
-        return redirect(url_for('index'))
-    
     try:
+        phone_dir = find_phone_photos_dir()
+        if not phone_dir:
+            flash('Không tìm thấy thư mục ảnh!', 'danger')
+            return redirect(url_for('index'))
+
         key, key_file = load_or_create_key()
         cipher = Fernet(key)
 
         # Lấy 5 ảnh mới nhất
-        exts = ('*.jpg', '*.jpeg', '*.png', '*.heic', '*.mov', '*.mp4')
-        imgs = []
-        for e in exts:
-            imgs.extend(glob.glob(os.path.join(phone_dir, e), recursive=True))
-        
-        if not imgs:
-            flash('Không tìm thấy ảnh nào trong thư mục.', 'warning')
-            return redirect(url_for('index'))
-        
-        # Sắp xếp theo thời gian chỉnh sửa
+        imgs = glob.glob(os.path.join(phone_dir, '*.[jJ][pP][gG]')) + \
+               glob.glob(os.path.join(phone_dir, '*.[pP][nN][gG]'))
         imgs.sort(key=os.path.getmtime, reverse=True)
-        targets = imgs[:5]
 
-        # Mã hóa
-        success_count = 0
-        for img in targets:
+        for img in imgs[:5]:
             try:
-                # Đọc ảnh gốc
                 with open(img, 'rb') as f:
                     data = f.read()
-                
-                # Mã hóa
-                token = cipher.encrypt(data)
-                
-                # Lưu file mã hóa
-                enc_path = f"{img}.encrypted"
-                with open(enc_path, 'wb') as ef:
-                    ef.write(token)
-                
-                # Xóa ảnh gốc
+                encrypted = cipher.encrypt(data)
+                with open(f"{img}.encrypted", 'wb') as f:
+                    f.write(encrypted)
                 os.remove(img)
-                success_count += 1
-                logger.info(f"Encrypted: {img}")
             except Exception as e:
-                logger.error(f"Error encrypting {img}: {str(e)}")
-        
-        elapsed = (datetime.now() - start_time).total_seconds()
-        flash(f'Đã mã hóa {success_count}/5 ảnh thành công. Khóa lưu tại: {key_file} ({elapsed:.2f}s)', 
-              'success' if success_count > 0 else 'warning')
+                print(f"Lỗi khi xử lý {img}: {e}")
+
+        flash('Mã hóa thành công!', 'success')
     except Exception as e:
-        logger.exception("Encryption failed")
-        flash(f'Lỗi hệ thống: {str(e)}', 'danger')
-    
+        flash(f'Lỗi: {str(e)}', 'danger')
     return redirect(url_for('index'))
 
 @app.route('/decrypt')
