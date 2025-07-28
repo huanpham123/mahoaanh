@@ -1,11 +1,11 @@
-from flask import Flask, render_template, redirect, url_for, flash, request
+from flask import Flask, render_template, redirect, url_for, flash
 import os
 import glob
-import string
 import platform
 from cryptography.fernet import Fernet
 import logging
 from datetime import datetime
+import time
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
@@ -14,87 +14,80 @@ app.secret_key = os.urandom(24)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Helper: Tìm thư mục ảnh trên điện thoại
-def find_phone_photos_dir():
-    # Danh sách các vị trí có khả năng chứa ảnh
-    common_paths = []
+def get_connected_devices():
+    """Lấy danh sách thiết bị kết nối"""
+    devices = []
     system = platform.system()
     
-    # Windows
     if system == 'Windows':
-        for drive in string.ascii_uppercase:
-            # Android
-            common_paths.extend([
-                f"{drive}:\\Phone\\DCIM\\Camera",
-                f"{drive}:\\Internal storage\\DCIM\\Camera",
-                f"{drive}:\\Card\\DCIM\\Camera",
-                f"{drive}:\\DCIM\\Camera",
-            ])
-            # iOS
-            common_paths.extend([
-                f"{drive}:\\Apple iPhone\\Internal Storage\\DCIM",
-                f"{drive}:\\iPhone\\DCIM",
-            ])
-    
-    # macOS
-    elif system == 'Darwin':
-        common_paths.extend([
-            "/Volumes/iPhone/DCIM",
-            "/Volumes/NO NAME/DCIM/Camera",
-            "/Volumes/ANDROID/DCIM/Camera",
-        ])
-    
-    # Linux
+        # Quét các ổ đĩa trên Windows
+        for drive in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ':
+            path = f"{drive}:\\"
+            if os.path.exists(path):
+                devices.append(path)
+    elif system == 'Darwin':  # macOS
+        # Kiểm tra thư mục /Volumes
+        if os.path.exists('/Volumes'):
+            devices.extend([f"/Volumes/{d}" for d in os.listdir('/Volumes')])
     elif system == 'Linux':
-        common_paths.extend([
-            "/media/$USER/Phone/DCIM/Camera",
-            "/media/$USER/Card/DCIM/Camera",
-            "/run/user/$USER/gvfs/mtp:host=*/DCIM/Camera",
-        ])
+        # Kiểm tra thư mục /media và /run
+        media_path = f"/media/{os.getlogin()}"
+        if os.path.exists(media_path):
+            devices.extend([f"{media_path}/{d}" for d in os.listdir(media_path)])
     
-    # Kiểm tra từng đường dẫn
-    for path in common_paths:
-        # Xử lý các biến trong đường dẫn
-        path = path.replace("$USER", os.getlogin())
-        path = os.path.expanduser(path)
-        
-        # Tìm kiếm các pattern có thể
-        if '*' in path:
-            for expanded in glob.glob(path):
-                if os.path.isdir(expanded):
-                    logger.info(f"Found photo directory: {expanded}")
-                    return expanded
-        elif os.path.isdir(path):
-            logger.info(f"Found photo directory: {path}")
-            return path
+    return devices
+
+def find_photos_directory():
+    """Tìm thư mục ảnh trên các thiết bị kết nối"""
+    possible_paths = [
+        'DCIM/Camera',
+        'DCIM/100ANDRO',
+        'Internal Storage/DCIM/Camera',
+        'Phone/DCIM/Camera',
+        'Card/DCIM/Camera',
+        'Pictures'
+    ]
     
-    # Tìm kiếm đệ quy nếu không thấy
-    logger.warning("Could not find DCIM/Camera, starting recursive search...")
-    search_roots = ['/', '/Volumes'] if system != 'Windows' else ['C:\\', 'D:\\']
+    for device in get_connected_devices():
+        for path in possible_paths:
+            full_path = os.path.join(device, path)
+            if os.path.exists(full_path):
+                logger.info(f"Found photos directory at: {full_path}")
+                return full_path
     
-    for root in search_roots:
-        for dirpath, dirnames, filenames in os.walk(root):
-            if 'DCIM' in dirnames:
-                camera_path = os.path.join(dirpath, 'DCIM', 'Camera')
-                if os.path.isdir(camera_path):
-                    logger.info(f"Found camera recursively: {camera_path}")
-                    return camera_path
+    logger.warning("No photos directory found in connected devices")
     return None
 
-# Helper: load hoặc tạo key trên Desktop
 def load_or_create_key():
+    """Tạo hoặc load encryption key"""
     desktop = os.path.join(os.path.expanduser("~"), "Desktop")
     os.makedirs(desktop, exist_ok=True)
     
-    key_file = os.path.join(desktop, 'image_encryption.key')
+    key_file = os.path.join(desktop, 'photo_encryption.key')
+    
     if os.path.exists(key_file):
-        with open(key_file, 'rb') as kf:
-            return kf.read(), key_file
+        with open(key_file, 'rb') as f:
+            return f.read(), key_file
     
     key = Fernet.generate_key()
-    with open(key_file, 'wb') as kf:
-        kf.write(key)
+    with open(key_file, 'wb') as f:
+        f.write(key)
+    
     return key, key_file
+
+def safe_file_operation(func, path, *args, **kwargs):
+    """Thực hiện thao tác file an toàn với retry"""
+    max_retries = 3
+    delay = 1  # giây
+    
+    for i in range(max_retries):
+        try:
+            return func(path, *args, **kwargs)
+        except (OSError, IOError) as e:
+            if i == max_retries - 1:
+                raise
+            logger.warning(f"Retry {i+1} for {path} due to {str(e)}")
+            time.sleep(delay)
 
 @app.route('/')
 def index():
@@ -103,87 +96,124 @@ def index():
 @app.route('/encrypt')
 def encrypt():
     try:
-        phone_dir = find_phone_photos_dir()
-        if not phone_dir:
-            flash('Không tìm thấy thư mục ảnh!', 'danger')
+        start_time = datetime.now()
+        photos_dir = find_photos_directory()
+        
+        if not photos_dir:
+            flash('Không tìm thấy thư mục ảnh. Vui lòng kết nối điện thoại và chọn chế độ truyền file (MTP).', 'danger')
             return redirect(url_for('index'))
-
+        
         key, key_file = load_or_create_key()
         cipher = Fernet(key)
-
-        # Lấy 5 ảnh mới nhất
-        imgs = glob.glob(os.path.join(phone_dir, '*.[jJ][pP][gG]')) + \
-               glob.glob(os.path.join(phone_dir, '*.[pP][nN][gG]'))
-        imgs.sort(key=os.path.getmtime, reverse=True)
-
-        for img in imgs[:5]:
+        
+        # Tìm tất cả ảnh hợp lệ
+        extensions = ('*.jpg', '*.jpeg', '*.png', '*.heic', '*.JPG', '*.JPEG')
+        image_files = []
+        
+        for ext in extensions:
             try:
-                with open(img, 'rb') as f:
-                    data = f.read()
-                encrypted = cipher.encrypt(data)
-                with open(f"{img}.encrypted", 'wb') as f:
-                    f.write(encrypted)
-                os.remove(img)
+                image_files.extend(glob.glob(os.path.join(photos_dir, ext)))
             except Exception as e:
-                print(f"Lỗi khi xử lý {img}: {e}")
-
-        flash('Mã hóa thành công!', 'success')
+                logger.warning(f"Error scanning for {ext}: {str(e)}")
+        
+        if not image_files:
+            flash('Không tìm thấy ảnh nào trong thư mục.', 'warning')
+            return redirect(url_for('index'))
+        
+        # Sắp xếp theo thời gian sửa đổi
+        image_files.sort(key=lambda x: safe_file_operation(os.path.getmtime, x), reverse=True)
+        target_files = image_files[:5]
+        
+        # Mã hóa từng file
+        success_count = 0
+        for img_path in target_files:
+            try:
+                # Đọc file
+                with safe_file_operation(open, img_path, 'rb') as f:
+                    data = f.read()
+                
+                # Mã hóa
+                encrypted_data = cipher.encrypt(data)
+                
+                # Ghi file mã hóa
+                encrypted_path = f"{img_path}.encrypted"
+                with safe_file_operation(open, encrypted_path, 'wb') as f:
+                    f.write(encrypted_data)
+                
+                # Xóa file gốc
+                safe_file_operation(os.remove, img_path)
+                success_count += 1
+                logger.info(f"Encrypted: {img_path}")
+            except Exception as e:
+                logger.error(f"Failed to encrypt {img_path}: {str(e)}")
+        
+        elapsed = (datetime.now() - start_time).total_seconds()
+        flash(f'Đã mã hóa thành công {success_count}/5 ảnh. Khóa bảo mật lưu tại: {key_file} (Thời gian: {elapsed:.2f}s)', 
+              'success' if success_count > 0 else 'warning')
+    
     except Exception as e:
-        flash(f'Lỗi: {str(e)}', 'danger')
+        logger.exception("Encryption failed")
+        flash(f'Lỗi hệ thống: {str(e)}', 'danger')
+    
     return redirect(url_for('index'))
 
 @app.route('/decrypt')
 def decrypt():
-    phone_dir = find_phone_photos_dir()
-    if not phone_dir:
-        flash('Không tìm thấy thư mục ảnh trên điện thoại.', 'danger')
-        return redirect(url_for('index'))
-    
     try:
-        # Load key
-        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
-        key_file = os.path.join(desktop, 'image_encryption.key')
+        start_time = datetime.now()
+        photos_dir = find_photos_directory()
         
-        if not os.path.exists(key_file):
-            flash('Không tìm thấy file khóa trên Desktop.', 'danger')
+        if not photos_dir:
+            flash('Không tìm thấy thư mục ảnh.', 'danger')
             return redirect(url_for('index'))
         
-        with open(key_file, 'rb') as kf:
-            key = kf.read()
+        # Load key
+        desktop = os.path.join(os.path.expanduser("~"), "Desktop")
+        key_file = os.path.join(desktop, 'photo_encryption.key')
+        
+        if not os.path.exists(key_file):
+            flash('Không tìm thấy file khóa giải mã trên Desktop.', 'danger')
+            return redirect(url_for('index'))
+        
+        with open(key_file, 'rb') as f:
+            key = f.read()
         
         cipher = Fernet(key)
-
-        # Tìm file mã hóa
-        encs = glob.glob(os.path.join(phone_dir, '*.encrypted'))
-        if not encs:
+        
+        # Tìm các file mã hóa
+        encrypted_files = glob.glob(os.path.join(photos_dir, '*.encrypted'))
+        
+        if not encrypted_files:
             flash('Không tìm thấy file mã hóa nào.', 'warning')
             return redirect(url_for('index'))
         
-        # Giải mã
+        # Giải mã từng file
         success_count = 0
-        for enc in encs:
+        for enc_path in encrypted_files:
             try:
                 # Đọc file mã hóa
-                with open(enc, 'rb') as ef:
-                    ed = ef.read()
+                with safe_file_operation(open, enc_path, 'rb') as f:
+                    encrypted_data = f.read()
                 
                 # Giải mã
-                dec = cipher.decrypt(ed)
+                decrypted_data = cipher.decrypt(encrypted_data)
                 
                 # Khôi phục tên file gốc
-                orig = enc.replace('.encrypted', '')
-                with open(orig, 'wb') as df:
-                    df.write(dec)
+                original_path = os.path.splitext(enc_path)[0]
+                with safe_file_operation(open, original_path, 'wb') as f:
+                    f.write(decrypted_data)
                 
                 # Xóa file mã hóa
-                os.remove(enc)
+                safe_file_operation(os.remove, enc_path)
                 success_count += 1
-                logger.info(f"Decrypted: {enc}")
+                logger.info(f"Decrypted: {enc_path}")
             except Exception as e:
-                logger.error(f"Error decrypting {enc}: {str(e)}")
+                logger.error(f"Failed to decrypt {enc_path}: {str(e)}")
         
-        flash(f'Đã giải mã {success_count}/{len(encs)} file thành công.', 
+        elapsed = (datetime.now() - start_time).total_seconds()
+        flash(f'Đã giải mã thành công {success_count}/{len(encrypted_files)} file. (Thời gian: {elapsed:.2f}s)',
               'success' if success_count > 0 else 'warning')
+    
     except Exception as e:
         logger.exception("Decryption failed")
         flash(f'Lỗi giải mã: {str(e)}', 'danger')
@@ -191,5 +221,4 @@ def decrypt():
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
